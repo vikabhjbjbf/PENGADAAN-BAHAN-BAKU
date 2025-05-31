@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Rekap Dinamis & Scan Barcode</title>
+<style>
+  body {
+    font-family: Arial, sans-serif;
+    margin: 20px auto;
+    max-width: 900px;
+  }
+  h2 {
+    text-align: center;
+    color: #2c3e50;
+  }
+  #reader {
+    margin: 10px auto;
+    width: 320px;
+    border: 1px solid #ccc;
+    display: none;
+  }
+  #notification {
+    text-align: center;
+    font-weight: bold;
+    min-height: 24px;
+    margin-bottom: 15px;
+  }
+  .flex-row {
+    display: flex;
+    gap: 15px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+  }
+  .flex-col {
+    flex: 1 1 200px;
+    display: flex;
+    flex-direction: column;
+  }
+  label {
+    font-weight: bold;
+    margin-bottom: 6px;
+  }
+  input[type=text], input[type=date], select {
+    padding: 8px;
+    font-size: 16px;
+  }
+  button {
+    background-color: #2980b9;
+    color: white;
+    border: none;
+    padding: 12px 25px;
+    cursor: pointer;
+    border-radius: 5px;
+    font-size: 16px;
+    margin-top: 10px;
+    transition: background-color 0.3s ease;
+  }
+  button:hover {
+    background-color: #3498db;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 15px;
+  }
+  th, td {
+    border: 1px solid #ddd;
+    padding: 10px;
+    text-align: center;
+  }
+  th {
+    background-color: #f5f6fa;
+  }
+  .action-btn {
+    background-color: #e74c3c;
+    color: white;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+  .action-btn:hover {
+    background-color: #c0392b;
+  }
+  .rekap {
+    display: flex;
+    justify-content: space-around;
+    margin-top: 25px;
+    padding: 15px;
+    background: #f7f9fa;
+    border-radius: 8px;
+  }
+  .rekap div {
+    font-weight: bold;
+    font-size: 18px;
+    padding: 15px 25px;
+    border-radius: 8px;
+    text-align: center;
+  }
+  .lulus { background: #d4efdf; color: #196f3d; }
+  .karantina { background: #fff9c4; color: #9a7d0a; }
+  .ditolak { background: #f8d7da; color: #721c24; }
+  #exportBtn {
+    margin-top: 20px;
+  }
+  #cameraBtn {
+    margin-top: 10px;
+    background-color: #27ae60;
+  }
+  #cameraBtn.inactive {
+    background-color: #95a5a6;
+  }
+  #chartContainer {
+    margin-top: 30px;
+  }
+</style>
+</head>
+<body>
+
+<h2>Monitoring & Rekap Dinamis Pengadaan Bahan Baku</h2>
+
+<div id="notification"></div>
+
+<!-- Form Input Manual -->
+<div class="flex-row">
+  <div class="flex-col">
+    <label for="barcodeInput">Barcode (SKU)</label>
+    <input type="text" id="barcodeInput" placeholder="Misal: BK00123" />
+  </div>
+  <div class="flex-col">
+    <label for="batchInput">Nomor Batch</label>
+    <input type="text" id="batchInput" placeholder="Misal: B20240501A" />
+  </div>
+  <div class="flex-col">
+    <label for="expiryInput">Tanggal Kadaluarsa</label>
+    <input type="date" id="expiryInput" />
+  </div>
+  <div class="flex-col">
+    <label for="locationInput">Lokasi Rak</label>
+    <input type="text" id="locationInput" placeholder="Misal: Rak A1" />
+  </div>
+  <div class="flex-col">
+    <label for="statusSelect">Status</label>
+    <select id="statusSelect">
+      <option value="Lulus">Lulus</option>
+      <option value="Karantina">Karantina</option>
+      <option value="Ditolak">Ditolak</option>
+    </select>
+  </div>
+</div>
+<button id="addBtn">Tambah Data Manual</button>
+
+<!-- Tombol Kamera & Scan -->
+<button id="cameraBtn" class="inactive">📷 Aktifkan Kamera</button>
+<div id="reader"></div>
+
+<!-- Export -->
+<button id="exportBtn">Export Rekap ke Excel</button>
+
+<!-- Rekap Status -->
+<div class="rekap">
+  <div class="lulus" id="countLulus">Lulus: 0</div>
+  <div class="karantina" id="countKarantina">Karantina: 0</div>
+  <div class="ditolak" id="countDitolak">Ditolak: 0</div>
+</div>
+
+<!-- Tabel Data -->
+<table>
+  <thead>
+    <tr>
+      <th>Barcode</th>
+      <th>Batch</th>
+      <th>Expiry</th>
+      <th>Lokasi</th>
+      <th>Status</th>
+      <th>Waktu Input</th>
+      <th>Aksi</th>
+    </tr>
+  </thead>
+  <tbody id="dataTableBody"></tbody>
+</table>
+
+<!-- Grafik -->
+<div id="chartContainer">
+  <canvas id="statusChart" width="400" height="250"></canvas>
+</div>
+
+<!-- Script dependencies -->
+<script src="https://unpkg.com/html5-qrcode@2.3.8/minified/html5-qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+
+<script>
+  // Element refs
+  const notification = document.getElementById('notification');
+  const dataTableBody = document.getElementById('dataTableBody');
+  const countLulus = document.getElementById('countLulus');
+  const countKarantina = document.getElementById('countKarantina');
+  const countDitolak = document.getElementById('countDitolak');
+  const cameraBtn = document.getElementById('cameraBtn');
+  const exportBtn = document.getElementById('exportBtn');
+  const addBtn = document.getElementById('addBtn');
+  const readerElem = document.getElementById('reader');
+
+  const barcodeInput = document.getElementById('barcodeInput');
+  const batchInput = document.getElementById('batchInput');
+  const expiryInput = document.getElementById('expiryInput');
+  const locationInput = document.getElementById('locationInput');
+  const statusSelect = document.getElementById('statusSelect');
+
+  // Data & Chart variables
+  let dataEntries = JSON.parse(localStorage.getItem('pengadaanData')) || [];
+  let html5QrCode = null;
+  let scannerRunning = false;
+  let statusChart = null;
+
+  // Show notification
+  function showNotification(msg, color = 'green') {
+    notification.textContent = msg;
+    notification.style.color = color;
+    setTimeout(() => notification.textContent = '', 4000);
+  }
+
+  // Render data table
+  function renderTable() {
+    dataTableBody.innerHTML = '';
+    if(dataEntries.length === 0){
+      dataTableBody.innerHTML = `<tr><td colspan="7" style="color:#888;">Data masih kosong</td></tr>`;
+      updateRekap();
+      updateChart();
+      return;
+    }
+    dataEntries.forEach((entry, idx) => {
+      const tr = document.createElement('tr');
+      tr.className = 'status-' + entry.status.toLowerCase();
+      tr.innerHTML = `
+        <td>${entry.barcode}</td>
+        <td>${entry.batch}</td>
+        <td>${entry.expiry || '-'}</td>
+        <td>${entry.location || '-'}</td>
+        <td>${entry.status}</td>
+        <td>${new Date(entry.timestamp).toLocaleString()}</td>
+        <td><button class="action-btn" onclick="deleteEntry(${idx})">Hapus</button></td>
+      `;
+      dataTableBody.appendChild(tr);
+    });
+    updateRekap();
+    updateChart();
+  }
+
+  // Update rekap status counts
+  function updateRekap() {
+    const count = { Lulus: 0, Karantina: 0, Ditolak: 0 };
+    dataEntries.forEach(e => {
+      if(e.status in count) count[e.status]++;
+    });
+    countLulus.textContent = `Lulus: ${count.Lulus}`;
+    countKarantina.textContent = `Karantina: ${count.Karantina}`;
+    countDitolak.textContent = `Ditolak: ${count.Ditolak}`;
+  }
+
+  // Delete entry by index
+  function deleteEntry(idx) {
+    if(confirm('Yakin ingin menghapus data ini?')){
+      dataEntries.splice(idx,1);
+      saveData();
+      showNotification('Data berhasil dihapus','red');
+    }
+  }
+
+  // Save data to localStorage and rerender
+  function saveData() {
+    localStorage.setItem('pengadaanData', JSON.stringify(dataEntries));
+    renderTable();
+  }
+
+  // Render Chart.js donut chart
+  function updateChart() {
+    const count = { Lulus: 0, Karantina: 0, Ditolak: 0 };
+    dataEntries.forEach(e => {
+      if(e.status in count) count[e.status]++;
+    });
+
+    const ctx = document.getElementById('statusChart').getContext('2d');
+    if(statusChart) statusChart.destroy();
+
+    statusChart = new Chart(ctx, {
+      type: 'doughnut',
+      data: {
+        labels: ['Lulus', 'Karantina', 'Ditolak'],
+        datasets: [{
+          data: [count.Lulus, count.Karantina, count.Ditolak],
+          backgroundColor: ['#196f3d','#9a7d0a','#721c24'],
+          borderColor: ['#d4efdf','#fff9c4','#f8d7da'],
+          borderWidth: 2
+        }]
+      },
+      options: {
+        responsive:true,
+        plugins:{legend:{position:'bottom'}}
+      }
+    });
+  }
+
+  // Validate and add manual data
+  addBtn.onclick = function(){
+    const barcode = barcodeInput.value.trim();
+    const batch = batchInput.value.trim();
+    const expiry = expiryInput.value;
+    const location = locationInput.value.trim();
+    const status = statusSelect.value;
+
+    if(!barcode || !batch || !location){
+      alert('Barcode, Batch, dan Lokasi harus diisi!');
+      return;
+    }
+
+    // Add or update existing
+    const idx = dataEntries.findIndex(e => e.barcode === barcode && e.batch === batch);
+    if(idx !== -1){
+      dataEntries[idx] = { barcode, batch, expiry, location, status, timestamp: Date.now() };
+      showNotification('Data berhasil diperbarui!');
+    } else {
+      dataEntries.push({ barcode, batch, expiry, location, status, timestamp: Date.now() });
+      showNotification('Data berhasil ditambahkan!');
+    }
+    saveData();
+
+    // Clear inputs
+    barcodeInput.value = '';
+    batchInput.value = '';
+    expiryInput.value = '';
+    locationInput.value = '';
+    statusSelect.value = 'Lulus';
+  };
+
+  // Process scanned barcode string (format: SKU|Batch|Expiry|Location|Status)
+  function processScannedData(decodedText){
+    const parts = decodedText.split('|').map(s => s.trim());
+    if(parts.length !== 5){
+      showNotification('Format barcode tidak valid! Gunakan: SKU|Batch|Expiry|Location|Status', 'red');
+      return;
+    }
+    const [barcode,batch,expiry,location,status] = parts;
+    const validStatuses = ['Lulus','Karantina','Ditolak'];
+    if(!validStatuses.includes(status)){
+      showNotification(`Status "${status}" tidak valid!`, 'red');
+      return;
+    }
+    const idx = dataEntries.findIndex(e => e.barcode === barcode && e.batch === batch);
+    if(idx !== -1){
+      dataEntries[idx] = { barcode,batch,expiry,location,status, timestamp: Date.now() };
+      showNotification('Data berhasil diperbarui dari scan: '+barcode);
+    } else {
+      dataEntries.push({ barcode,batch,expiry,location,status, timestamp: Date.now() });
+      showNotification('Data berhasil ditambahkan dari scan: '+barcode);
+    }
+    saveData();
+  }
+
+  // Toggle camera scanner start/stop
+  cameraBtn.onclick = function(){
+    if(scannerRunning){
+      stopScanner();
+    } else {
+      startScanner();
+    }
+  };
+
+  function startScanner(){
+    if(!html5QrCode){
+      html5QrCode = new Html5Qrcode('reader');
+    }
+    html5QrCode.start(
+      { facingMode: 'environment' },
+      { fps:10, qrbox:250 },
+      decodedText => {
+        processScannedData(decodedText);
+      },
+      errorMessage => { /* ignore errors */ }
+    ).then(() => {
+      scannerRunning = true;
+      readerElem.style.display = 'block';
+      cameraBtn.classList.remove('inactive');
+      cameraBtn.textContent = '📷 Kamera Aktif (Klik untuk Matikan)';
+    }).catch(err => {
+      showNotification('Gagal akses kamera: '+err,'red');
+    });
+  }
+
+  function stopScanner(){
+    if(html5QrCode){
+      html5QrCode.stop().then(() => {
+        scannerRunning = false;
+        readerElem.style.display = 'none';
+        cameraBtn.classList.add('inactive');
+        cameraBtn.textContent = '📷 Kamera Mati (Klik untuk Aktifkan)';
+      }).catch(() => {
+        showNotification('Gagal mematikan kamera','red');
+      });
+    }
+  }
+
+  // Export data ke Excel pakai SheetJS
+  exportBtn.onclick = function(){
+    if(dataEntries.length === 0){
+      alert('Tidak ada data untuk diekspor.');
+      return;
+    }
+    const worksheetData = dataEntries.map(e => ({
+      Barcode: e.barcode,
+      Batch: e.batch,
+      Expiry: e.expiry,
+      Lokasi: e.location,
+      Status: e.status,
+      'Waktu Input': new Date(e.timestamp).toLocaleString()
+    }));
+    const ws = XLSX.utils.json_to_sheet(worksheetData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Rekap Pengadaan");
+    XLSX.writeFile(wb, "Rekap_Pengadaan_Bahan_Baku.xlsx");
+  };
+
+  // Init render
+  renderTable();
+  updateChart();
+  cameraBtn.classList.add('inactive');
+  cameraBtn.textContent = '📷 Kamera Mati (Klik untuk Aktifkan)';
+
+  let scannerRunning = false;
+</script>
+
+</body>
+</html>
